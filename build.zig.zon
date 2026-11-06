@@ -1,0 +1,19 @@
+.{
+    .name = .kosm_json,
+    .version = "0.0.0",
+    .fingerprint = 0xa81ecdb17588af17, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .kosm = .{ .path = "../.." },
+        .tree_sitter_json = .{
+            .url = "git+https://github.com/tree-sitter/tree-sitter-json?ref=v0.24.8#ee35a6ebefcef0c5c416c0d1ccec7370cfca5a24",
+            .hash = "N-V-__8AACVXAgA_t-N8nrK20OmKiOtw3RhaBCAnXwQIiQ8g",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "root.zig",
+        "README.md",
+    },
+}
