@@ -1,11 +1,14 @@
 # kosm_json
 
-JSON for kosm: the `json` adapter, which claims `.json` and `.jsonc` files and enables `edit`.
-Comments are allowed; trailing commas are not (the file is refused with its line, as with any
-syntax error).
+JSON for kosm: two adapters enabling `edit` (D81).
+
+- `json` claims `.json` files: strict JSON, where a trailing comma is a syntax error (the file is
+  refused with its line, as with any syntax error).
+- `jsonc` claims `.jsonc` files and also takes `//` and `/* */` comments and trailing commas. Pass
+  `.lang = "jsonc"` for a `.json` file written that way, such as VS Code's `settings.json`.
 
 ```zig
-var settings = try output.edit(.{ .files = "~/.config/Code/User/settings.json" });
+var settings = try output.edit(.{ .files = "~/.config/Code/User/settings.json", .lang = "jsonc" });
 try settings.set("\"editor.fontSize\"", 16);                              // a key holding a dot is quoted
 try settings.set(.{ "workbench.colorCustomizations", "editor.background" }, color);
 ```
@@ -22,4 +25,4 @@ Only the value's bytes change; comments, spacing and key order stay as they are.
 | `kosm.raw(text)` | `text`, verbatim |
 
 Paths name object keys only (D77). Reach array elements with `nodes`, `elements` and `replace`
-(D80).
+(D80); `nodes("")` is the top-level value, for a file that is one array.

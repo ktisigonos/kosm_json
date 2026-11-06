@@ -5,11 +5,11 @@ const kosm = @import("kosm");
 
 extern fn tree_sitter_json() callconv(.c) *const kosm.treesitter.Language;
 
-/// Edits `.json` and `.jsonc` files (comments allowed) through `output.edit` (D31, D39).
-/// A key holding a dot is a quoted path segment: `"editor.fontSize"`.
+/// Edits strict `.json` files through `output.edit` (D31, D39); comments are allowed, trailing
+/// commas are not (D81). A key holding a dot is a quoted path segment: `"editor.fontSize"`.
 pub const adapter: kosm.Adapter = .{
     .name = "json",
-    .extensions = &.{ ".json", ".jsonc" },
+    .extensions = &.{".json"},
     .default_format = .{ .boolean = .true_false },
     .format = format,
     .parser = kosm.treesitter.parser(tree_sitter_json, .{
@@ -21,6 +21,18 @@ pub const adapter: kosm.Adapter = .{
         .quoted_key = &.{"string"},
     }),
 };
+
+/// Edits JSONC: `.jsonc` files, and with `.lang = "jsonc"` any JSON file with comments or
+/// trailing commas, such as VS Code's `settings.json` (D81). Writes values like `json`.
+pub const jsonc: kosm.Adapter = .{
+    .name = "jsonc",
+    .extensions = &.{".jsonc"},
+    .default_format = adapter.default_format,
+    .format = format,
+    .parser = JsoncParser.parse,
+};
+
+const JsoncParser = @import("JsoncParser.zig");
 
 /// One value as JSON: strings and colors quoted and escaped, tables and lists on one line.
 fn format(writer: *std.Io.Writer, value: kosm.Value, context: *kosm.Adapter.Context) kosm.Adapter.Error!void {
@@ -80,6 +92,10 @@ fn writeString(writer: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!voi
 
 const testing = std.testing;
 
+test {
+    _ = JsoncParser;
+}
+
 const Fixture = struct {
     tmp: testing.TmpDir,
     arena: std.heap.ArenaAllocator,
@@ -98,7 +114,7 @@ const Fixture = struct {
         fixture.output = .{
             .allocator = fixture.arena.allocator(),
             .home = fixture.home_buffer[0..length],
-            .adapters = &.{adapter},
+            .adapters = &.{ adapter, jsonc },
             .plan = &fixture.plan,
             .diagnostics = &fixture.diagnostics,
             .app = "editor",
@@ -271,11 +287,32 @@ test "edit refuses files that do not parse, naming the line" {
     try testing.expectEqualStrings("adapter 'json': line 2, column 9: syntax error; kosm edits only files that parse", fixture.diagnostics.message());
 }
 
-test "a trailing comma is a syntax error, as in strict JSON" {
+test "a trailing comma is a syntax error in json and fine in jsonc" {
     var fixture: Fixture = undefined;
-    try fixture.init(&.{.{ "settings.json", "{\n  \"a\": 1,\n}\n" }});
+    try fixture.init(&.{.{ "settings.json", "{\n  // size\n  \"a\": 1,\n}\n" }});
     defer fixture.deinit();
     try testing.expectError(error.InvalidSyntax, fixture.output.edit(.{ .files = "~/settings.json" }));
+    var settings = try fixture.output.edit(.{ .files = "~/settings.json", .lang = "jsonc" });
+    try settings.set("a", 2);
+    try testing.expectEqualStrings("{\n  // size\n  \"a\": 2,\n}\n", fixture.planned("~/settings.json"));
+}
+
+test "an empty path reaches a top-level array, such as waybar's list of bars" {
+    var fixture: Fixture = undefined;
+    try fixture.init(&.{ .{ "waybar/config.jsonc", "[\n  { \"layer\": \"top\" },\n  { \"layer\": \"bottom\" },\n]\n" }, .{ "list.json", "[1, 2]" } });
+    defer fixture.deinit();
+    var bars = try fixture.output.edit(.{ .files = "~/waybar/config.jsonc" });
+    const roots = try bars.nodes("");
+    try testing.expectEqual(1, roots.len);
+    const bar_list = try bars.elements(roots[0]);
+    try testing.expectEqual(2, bar_list.len);
+    try testing.expectEqual(3, bar_list[1].line);
+    try testing.expectError(error.InvalidKeyPath, bars.set("", 1));
+
+    var list = try fixture.output.edit(.{ .files = "~/list.json" });
+    const numbers = try list.elements((try list.nodes(""))[0]);
+    try list.replace(numbers[1], 3);
+    try testing.expectEqualStrings("[1, 3]", fixture.planned("~/list.json"));
 }
 
 test "edit errors for no files, a missing capability and unwritable values" {
