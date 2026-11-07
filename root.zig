@@ -101,6 +101,7 @@ const Fixture = struct {
     arena: std.heap.ArenaAllocator,
     plan: kosm.Plan,
     diagnostics: kosm.Diagnostics = .{},
+    warnings: kosm.Warnings = undefined,
     home_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     output: kosm.Output = undefined,
 
@@ -110,6 +111,7 @@ const Fixture = struct {
             if (std.Io.Dir.path.dirname(file[0])) |parent| try fixture.tmp.dir.createDirPath(testing.io, parent);
             try fixture.tmp.dir.writeFile(testing.io, .{ .sub_path = file[0], .data = file[1] });
         }
+        fixture.warnings = .init(fixture.arena.allocator());
         const length = try fixture.tmp.dir.realPath(testing.io, &fixture.home_buffer);
         fixture.output = .{
             .allocator = fixture.arena.allocator(),
@@ -117,6 +119,7 @@ const Fixture = struct {
             .adapters = &.{ adapter, jsonc },
             .plan = &fixture.plan,
             .diagnostics = &fixture.diagnostics,
+            .warnings = &fixture.warnings,
             .app = "editor",
         };
     }
@@ -178,6 +181,25 @@ test "set changes only the value's bytes in commented, oddly spaced JSON" {
         \\}
         \\
     , fixture.planned("~/Code/User/settings.json"));
+}
+
+test "a color clipped to the gamut warns naming the path and is still written" {
+    var fixture: Fixture = undefined;
+    try fixture.init(&.{.{ "settings.json", vscode_settings }});
+    defer fixture.deinit();
+    const vivid: kosm.Color = .{ .lightness = 0.9, .chroma = 0.4, .hue = 140 };
+    var settings = try fixture.output.edit(.{ .files = "~/settings.json" });
+    try settings.set(.{ "workbench.colorCustomizations", "editor.background" }, vivid);
+    try settings.set(.{ "workbench.colorCustomizations", "terminal.background" }, vivid.format("{}", &.{.hex}));
+    try settings.set("\"editor.fontSize\"", 16);
+
+    const warnings = fixture.warnings.items.items;
+    try testing.expectEqual(2, warnings.len);
+    try testing.expectEqualStrings("editor", warnings[0].app);
+    try testing.expectEqualStrings("~/settings.json", warnings[0].file);
+    try testing.expectEqualStrings("path '\"workbench.colorCustomizations\".\"editor.background\"': color oklch(0.9 0.4 140) is outside sRGB and is clipped to #00ff00 (D48)", warnings[0].message);
+    try testing.expect(std.mem.startsWith(u8, warnings[1].message, "path '\"workbench.colorCustomizations\".\"terminal.background\"': color "));
+    try testing.expect(std.mem.indexOf(u8, fixture.planned("~/settings.json"), "\"editor.background\"  :   \"#00ff00\"") != null);
 }
 
 test "an unchanged value leaves the file unchanged" {
