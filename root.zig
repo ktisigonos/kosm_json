@@ -5,8 +5,8 @@ const kosm = @import("kosm");
 
 extern fn tree_sitter_json() callconv(.c) *const kosm.treesitter.Language;
 
-/// Edits strict `.json` files through `output.edit` (D31, D39); comments are allowed, trailing
-/// commas are not (D81). A key holding a dot is a quoted path segment: `"editor.fontSize"`.
+/// Edits strict `.json` files through `output.edit`; comments are allowed, trailing
+/// commas are not. A key holding a dot is a quoted path segment: `"editor.fontSize"`.
 pub const adapter: kosm.Adapter = .{
     .name = "json",
     .extensions = &.{".json"},
@@ -23,7 +23,7 @@ pub const adapter: kosm.Adapter = .{
 };
 
 /// Edits JSONC: `.jsonc` files, and with `.lang = "jsonc"` any JSON file with comments or
-/// trailing commas, such as VS Code's `settings.json` (D81). Writes values like `json`.
+/// trailing commas, such as VS Code's `settings.json`. Writes values like `json`.
 pub const jsonc: kosm.Adapter = .{
     .name = "jsonc",
     .extensions = &.{".jsonc"},
@@ -198,7 +198,7 @@ test "a color clipped to the gamut warns naming the path and is still written" {
     try testing.expectEqual(2, warnings.len);
     try testing.expectEqualStrings("editor", warnings[0].app);
     try testing.expectEqualStrings("~/settings.json", warnings[0].file);
-    try testing.expectEqualStrings("path '\"workbench.colorCustomizations\".\"editor.background\"': color oklch(0.9 0.4 140) is outside sRGB and is clipped to #00ff00 (D48)", warnings[0].message);
+    try testing.expectEqualStrings("path '\"workbench.colorCustomizations\".\"editor.background\"': color oklch(0.9 0.4 140) is outside sRGB and is clipped to #00ff00", warnings[0].message);
     try testing.expect(std.mem.startsWith(u8, warnings[1].message, "path '\"workbench.colorCustomizations\".\"terminal.background\"': color "));
     try testing.expect(std.mem.indexOf(u8, fixture.planned("~/settings.json"), "\"editor.background\"  :   \"#00ff00\"") != null);
 }
@@ -234,7 +234,7 @@ test "cardinality decides how many matches across files may be set" {
     var bars = try fixture.output.edit(.{ .files = "~/waybar/*.jsonc" });
 
     try testing.expectError(error.TooManyMatches, bars.set("height", 32));
-    try testing.expectEqualStrings("path 'height' matches 2 values (~/waybar/bottom.jsonc:1, ~/waybar/top.jsonc:3); narrow .files, or pick with setFirst, setAll or setNth (D31)", fixture.diagnostics.message());
+    try testing.expectEqualStrings("path 'height' matches 2 values (~/waybar/bottom.jsonc:1, ~/waybar/top.jsonc:3); narrow .files, or pick with setFirst, setAll or setNth", fixture.diagnostics.message());
     try testing.expectEqualStrings("~/waybar/*.jsonc", fixture.diagnostics.file);
     try testing.expectError(error.NoMatch, bars.set("width", 32));
     try testing.expectError(error.IndexOutOfRange, bars.setNth("height", 2, 32));
@@ -265,7 +265,7 @@ test "cardinality decides how many matches across files may be set" {
     , fixture.planned("~/waybar/top.jsonc"));
 
     try testing.expectError(error.EditsOverlap, bars.setFirst("layer", "top"));
-    try testing.expectEqualStrings("app 'editor' already writes the value on line 1 of this file; the same bytes cannot be written twice (D38)", fixture.diagnostics.message());
+    try testing.expectEqualStrings("app 'editor' already writes the value on line 1 of this file; the same bytes cannot be written twice", fixture.diagnostics.message());
 }
 
 test "a duplicate key is two matches, so set refuses to guess" {
@@ -343,7 +343,7 @@ test "edit errors for no files, a missing capability and unwritable values" {
     try fixture.init(&.{.{ "a.json", "{ \"enabled\": true, \"ratio\": 0.5 }" }});
     defer fixture.deinit();
     try testing.expectError(error.NoFile, fixture.output.edit(.{ .files = "~/nowhere/*.json" }));
-    try testing.expectEqualStrings("matches no file; edit only changes files that exist (D28)", fixture.diagnostics.message());
+    try testing.expectEqualStrings("matches no file; edit only changes files that exist", fixture.diagnostics.message());
     try testing.expectError(error.NoFile, fixture.output.edit(.{ .files = "~/*.json", .exclude = &.{"~/a.json"} }));
 
     var file = try fixture.output.edit(.{ .files = "~/a.json", .format = .{ .boolean = .yes_no } });

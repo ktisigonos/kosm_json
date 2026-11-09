@@ -1,5 +1,5 @@
 //! Reads JSONC, JSON with `//` and `/* */` comments and trailing commas (VS Code settings,
-//! waybar), into the tree kosm matches paths against. Hand-written (D40): no tree-sitter
+//! waybar), into the tree kosm matches paths against. Hand-written: no tree-sitter
 //! grammar accepts trailing commas. Keys keep their escapes as written, like the `json` adapter.
 
 const JsoncParser = @This();

@@ -1,6 +1,6 @@
 # kosm_json
 
-JSON for kosm: two adapters enabling `edit` (D81).
+JSON for kosm: two adapters enabling `edit`.
 
 - `json` claims `.json` files: strict JSON, where a trailing comma is a syntax error (the file is
   refused with its line, as with any syntax error).
@@ -18,11 +18,10 @@ Only the value's bytes change; comments, spacing and key order stay as they are.
 | Value | Written as |
 |---|---|
 | string | a JSON string, escaped |
-| color | a JSON string in the file's color format; default `#rrggbb` (D61) |
+| color | a JSON string in the file's color format; default `#rrggbb` |
 | integer, float | the number; floats at the file's precision, never infinity or NaN |
 | bool | `true` or `false`; `format.boolean` must stay `.true_false` |
 | struct, list | an object or array on one line |
 | `kosm.raw(text)` | `text`, verbatim |
 
-Paths name object keys only (D77). Reach array elements with `nodes`, `elements` and `replace`
-(D80); `nodes("")` is the top-level value, for a file that is one array.
+Paths name object keys only. Reach array elements with `nodes`, `elements` and `replace`; `nodes("")` is the top-level value, for a file that is one array.
