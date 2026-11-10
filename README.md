@@ -1,9 +1,10 @@
 # kosm_json
 
-JSON for kosm: two adapters enabling `edit`.
+JSON for kosm: two adapters enabling `edit`, and `generate` for `json`.
 
 - `json` claims `.json` files: strict JSON, where a trailing comma is a syntax error (the file is
-  refused with its line, as with any syntax error).
+  refused with its line, as with any syntax error). It also writes whole files through
+  `generate`, indented by two spaces.
 - `jsonc` claims `.jsonc` files and also takes `//` and `/* */` comments and trailing commas. Pass
   `.lang = "jsonc"` for a `.json` file written that way, such as VS Code's `settings.json`.
 

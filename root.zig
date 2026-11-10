@@ -7,11 +7,13 @@ extern fn tree_sitter_json() callconv(.c) *const kosm.treesitter.Language;
 
 /// Edits strict `.json` files through `output.edit`; comments are allowed, trailing
 /// commas are not. A key holding a dot is a quoted path segment: `"editor.fontSize"`.
+/// `generate` writes whole files, objects and arrays indented by two spaces.
 pub const adapter: kosm.Adapter = .{
     .name = "json",
     .extensions = &.{".json"},
     .default_format = .{ .boolean = .true_false },
     .format = format,
+    .serialize = serialize,
     .parser = kosm.treesitter.parser(tree_sitter_json, .{
         .pair = "pair",
         .key = "key",
@@ -74,6 +76,46 @@ fn format(writer: *std.Io.Writer, value: kosm.Value, context: *kosm.Adapter.Cont
             }
             try writer.writeByte('}');
         },
+    }
+}
+
+/// Spaces per nesting level in a generated file.
+const indent_width = 2;
+
+/// A whole file: `format`'s values, with objects and arrays that hold anything spread over
+/// indented lines, ending in a newline.
+fn serialize(writer: *std.Io.Writer, root: kosm.Value, context: *kosm.Adapter.Context) kosm.Adapter.Error!void {
+    try writeIndented(writer, root, 0, context);
+    try writer.writeByte('\n');
+}
+
+fn writeIndented(writer: *std.Io.Writer, value: kosm.Value, depth: usize, context: *kosm.Adapter.Context) kosm.Adapter.Error!void {
+    switch (value) {
+        .table => |entries| {
+            if (entries.len == 0) return writer.writeAll("{}");
+            try writer.writeAll("{\n");
+            for (entries, 0..) |entry, index| {
+                try writer.splatByteAll(' ', (depth + 1) * indent_width);
+                try writeString(writer, entry.key);
+                try writer.writeAll(": ");
+                try writeIndented(writer, entry.value, depth + 1, context);
+                try writer.writeAll(if (index + 1 == entries.len) "\n" else ",\n");
+            }
+            try writer.splatByteAll(' ', depth * indent_width);
+            try writer.writeByte('}');
+        },
+        .list => |items| {
+            if (items.len == 0) return writer.writeAll("[]");
+            try writer.writeAll("[\n");
+            for (items, 0..) |item, index| {
+                try writer.splatByteAll(' ', (depth + 1) * indent_width);
+                try writeIndented(writer, item, depth + 1, context);
+                try writer.writeAll(if (index + 1 == items.len) "\n" else ",\n");
+            }
+            try writer.splatByteAll(' ', depth * indent_width);
+            try writer.writeByte(']');
+        },
+        else => try format(writer, value, context),
     }
 }
 
@@ -368,4 +410,33 @@ test "format escapes strings and spells floats in the file's precision" {
     try file.set("ratio", 0.125);
     try file.set("nested", .{ .on = true, .names = .{ "x", "y" } });
     try testing.expectEqualStrings("{ \"text\": \"a\\\\b\\u0001\", \"ratio\": 0.13, \"nested\": {\"on\": true, \"names\": [\"x\", \"y\"]} }", fixture.planned("~/a.json"));
+}
+
+test "generate writes a whole file indented, empty objects and arrays on one line" {
+    var fixture: Fixture = undefined;
+    try fixture.init(&.{});
+    defer fixture.deinit();
+    try fixture.output.generate(.{ .file = "~/theme.json" }, .{
+        .id = "kosm",
+        .fg = kosm.hex("#a3c5cc"),
+        .chrome = .{ .accent = kosm.hex("#2d8699"), .sizes = .{ 1, 2.5 } },
+        .empty = kosm.Value{ .table = &.{} },
+        .none = [0]u8{},
+    });
+    try testing.expectEqualStrings(
+        \\{
+        \\  "id": "kosm",
+        \\  "fg": "#a3c5cc",
+        \\  "chrome": {
+        \\    "accent": "#2d8699",
+        \\    "sizes": [
+        \\      1,
+        \\      2.5
+        \\    ]
+        \\  },
+        \\  "empty": {},
+        \\  "none": []
+        \\}
+        \\
+    , fixture.planned("~/theme.json"));
 }
