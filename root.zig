@@ -36,12 +36,21 @@ pub const jsonc: kosm.Adapter = .{
 
 const JsoncParser = @import("JsoncParser.zig");
 
-/// One value as JSON: strings and colors quoted and escaped, tables and lists on one line.
+/// One value as JSON: strings, colors and joined values quoted and escaped, tables and lists on
+/// one line. JSON has no bare text such as `0.25s`, so a joined value is one string.
 fn format(writer: *std.Io.Writer, value: kosm.Value, context: *kosm.Adapter.Context) kosm.Adapter.Error!void {
     switch (value) {
         .string => |text| try writeString(writer, text),
         .raw => |text| try writer.writeAll(text),
-        .joined => |parts| for (parts) |part| try format(writer, part, context),
+        .joined => {
+            var buffer: [max_joined_length]u8 = undefined;
+            var rendered: std.Io.Writer = .fixed(&buffer);
+            writePlain(&rendered, value, context) catch |err| switch (err) {
+                error.WriteFailed => return context.unsupported("a joined value is longer than {d} bytes", .{max_joined_length}),
+                error.UnsupportedValue => return error.UnsupportedValue,
+            };
+            try writeString(writer, rendered.buffered());
+        },
         .integer => |integer| try writer.print("{d}", .{integer}),
         .float => |float| {
             if (!std.math.isFinite(float)) return context.unsupported("JSON has no infinity or NaN", .{});
@@ -76,6 +85,22 @@ fn format(writer: *std.Io.Writer, value: kosm.Value, context: *kosm.Adapter.Cont
             }
             try writer.writeByte('}');
         },
+    }
+}
+
+/// Longest joined value written as one string.
+const max_joined_length = 1024;
+
+/// A value's text inside a string: parts of a joined value are written back to back.
+fn writePlain(writer: *std.Io.Writer, value: kosm.Value, context: *kosm.Adapter.Context) kosm.Adapter.Error!void {
+    switch (value) {
+        .string, .raw => |text| try writer.writeAll(text),
+        .integer => |integer| try writer.print("{d}", .{integer}),
+        .float => |float| try context.writeFloat(writer, float),
+        .boolean => |boolean| try context.writeBoolean(writer, boolean),
+        .color => |color| try context.writeColor(writer, color),
+        .joined => |parts| for (parts) |part| try writePlain(writer, part, context),
+        .list, .table => return context.unsupported("a joined value holds plain parts, not a {s}", .{@tagName(value)}),
     }
 }
 
@@ -410,6 +435,15 @@ test "format escapes strings and spells floats in the file's precision" {
     try file.set("ratio", 0.125);
     try file.set("nested", .{ .on = true, .names = .{ "x", "y" } });
     try testing.expectEqualStrings("{ \"text\": \"a\\\\b\\u0001\", \"ratio\": 0.13, \"nested\": {\"on\": true, \"names\": [\"x\", \"y\"]} }", fixture.planned("~/a.json"));
+}
+
+test "a joined value is one JSON string, so text with a unit stays valid JSON" {
+    var fixture: Fixture = undefined;
+    try fixture.init(&.{.{ "a.json", "{ \"duration\": \"\" }" }});
+    defer fixture.deinit();
+    var file = try fixture.output.edit(.{ .files = "~/a.json" });
+    try file.set("duration", kosm.Value{ .joined = &.{ .{ .float = 0.25 }, .{ .raw = "s" } } });
+    try testing.expectEqualStrings("{ \"duration\": \"0.25s\" }", fixture.planned("~/a.json"));
 }
 
 test "generate writes a whole file indented, empty objects and arrays on one line" {
