@@ -8,6 +8,10 @@ JSON for kosm: two adapters enabling `edit`, and `generate` for `json`.
 - `jsonc` claims `.jsonc` files and also takes `//` and `/* */` comments and trailing commas. Pass
   `.lang = "jsonc"` for a `.json` file written that way, such as VS Code's `settings.json`.
 
+Both can add an app's own include entry with `insert` (a key at the end of an object) and
+`append` (an element at the end of an array): the entry goes on its own line after the last one,
+indented like it, with comments left where they are and a trailing comma kept.
+
 ```zig
 var settings = try output.edit(.{ .files = "~/.config/Code/User/settings.json", .lang = "jsonc" });
 try settings.set("\"editor.fontSize\"", 16);                              // a key holding a dot is quoted

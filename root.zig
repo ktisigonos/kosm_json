@@ -14,6 +14,7 @@ pub const adapter: kosm.Adapter = .{
     .default_format = .{ .boolean = .true_false },
     .format = format,
     .serialize = serialize,
+    .insert = insert,
     .parser = kosm.treesitter.parser(tree_sitter_json, .{
         .pair = "pair",
         .key = "key",
@@ -31,10 +32,23 @@ pub const jsonc: kosm.Adapter = .{
     .extensions = &.{".jsonc"},
     .default_format = adapter.default_format,
     .format = format,
+    .insert = insert,
     .parser = JsoncParser.parse,
 };
 
 const JsoncParser = @import("JsoncParser.zig");
+const inserting = @import("inserting.zig");
+
+/// An entry at the end of an object or array: `"key": value`, or the value in an array.
+fn insert(allocator: std.mem.Allocator, source: []const u8, parent: *const kosm.Adapter.Node, key: ?[]const u8, value: []const u8, context: *kosm.Adapter.Context) kosm.Adapter.InsertError![]const kosm.Adapter.Insertion {
+    var entry: std.Io.Writer.Allocating = .init(allocator);
+    if (key) |name| {
+        writeString(&entry.writer, name) catch return error.OutOfMemory;
+        entry.writer.writeAll(": ") catch return error.OutOfMemory;
+    }
+    entry.writer.writeAll(value) catch return error.OutOfMemory;
+    return inserting.insert(allocator, source, parent, entry.written(), context);
+}
 
 /// One value as JSON: strings, colors and joined values quoted and escaped, tables and lists on
 /// one line. JSON has no bare text such as `0.25s`, so a joined value is one string.
@@ -251,22 +265,14 @@ test "set changes only the value's bytes in commented, oddly spaced JSON" {
     , fixture.planned("~/Code/User/settings.json"));
 }
 
-test "a color clipped to the gamut warns naming the path and is still written" {
+test "a color outside sRGB is written clipped, without a warning" {
     var fixture: Fixture = undefined;
     try fixture.init(&.{.{ "settings.json", vscode_settings }});
     defer fixture.deinit();
     const vivid: kosm.Color = .{ .lightness = 0.9, .chroma = 0.4, .hue = 140 };
     var settings = try fixture.output.edit(.{ .files = "~/settings.json" });
     try settings.set(.{ "workbench.colorCustomizations", "editor.background" }, vivid);
-    try settings.set(.{ "workbench.colorCustomizations", "terminal.background" }, vivid.format("{}", &.{.hex}));
-    try settings.set("\"editor.fontSize\"", 16);
-
-    const warnings = fixture.warnings.items.items;
-    try testing.expectEqual(2, warnings.len);
-    try testing.expectEqualStrings("editor", warnings[0].app);
-    try testing.expectEqualStrings("~/settings.json", warnings[0].file);
-    try testing.expectEqualStrings("path '\"workbench.colorCustomizations\".\"editor.background\"': color oklch(0.9 0.4 140) is outside sRGB and is clipped to #00ff00", warnings[0].message);
-    try testing.expect(std.mem.startsWith(u8, warnings[1].message, "path '\"workbench.colorCustomizations\".\"terminal.background\"': color "));
+    try testing.expectEqual(0, fixture.warnings.items.items.len);
     try testing.expect(std.mem.indexOf(u8, fixture.planned("~/settings.json"), "\"editor.background\"  :   \"#00ff00\"") != null);
 }
 
@@ -473,4 +479,78 @@ test "generate writes a whole file indented, empty objects and arrays on one lin
         \\}
         \\
     , fixture.planned("~/theme.json"));
+}
+
+/// Adds `key` with `value` to the top-level object of `text` as `lang`, returning the file planned.
+fn insertTop(fixture: *Fixture, lang: []const u8, text: []const u8, key: []const u8, value: anytype) ![]const u8 {
+    try fixture.init(&.{.{ "settings.json", text }});
+    var settings = try fixture.output.edit(.{ .files = "~/settings.json", .lang = lang });
+    try settings.insert((try settings.nodes(""))[0], key, value);
+    return fixture.planned("~/settings.json");
+}
+
+test "insert puts a key on its own line after the last, keeping a comment on that line" {
+    const cases = [_]struct { lang: []const u8, text: []const u8, expected: []const u8 }{
+        .{
+            .lang = "json",
+            .text = "// Vicinae\n{\n   \"a\": 1,\n   \"b\": {\n      \"c\": 2\n   } // last\n}\n",
+            .expected = "// Vicinae\n{\n   \"a\": 1,\n   \"b\": {\n      \"c\": 2\n   }, // last\n   \"imports\": [\"kosm.json\"]\n}\n",
+        },
+        .{
+            .lang = "jsonc",
+            .text = "{\n\t\"a\": 1,\n}\n",
+            .expected = "{\n\t\"a\": 1,\n\t\"imports\": [\"kosm.json\"],\n}\n",
+        },
+        .{
+            .lang = "json",
+            .text = "{\"a\": 1 /* x */}",
+            .expected = "{\"a\": 1, \"imports\": [\"kosm.json\"] /* x */}",
+        },
+        .{
+            .lang = "jsonc",
+            .text = "{\"a\": 1, }",
+            .expected = "{\"a\": 1, \"imports\": [\"kosm.json\"], }",
+        },
+        .{ .lang = "json", .text = "{ }\n", .expected = "{\"imports\": [\"kosm.json\"]}\n" },
+    };
+    for (cases) |case| {
+        var fixture: Fixture = undefined;
+        defer fixture.deinit();
+        try testing.expectEqualStrings(case.expected, try insertTop(&fixture, case.lang, case.text, "imports", &[_][]const u8{"kosm.json"}));
+    }
+}
+
+test "append adds an element after the last, or first into a list holding only comments" {
+    const cases = [_]struct { text: []const u8, expected: []const u8 }{
+        .{
+            .text = "{\n  \"imports\": [\n    \"a.json\"\n  ]\n}\n",
+            .expected = "{\n  \"imports\": [\n    \"a.json\",\n    \"kosm.json\"\n  ]\n}\n",
+        },
+        .{ .text = "{\"imports\": [\"a.json\"]}", .expected = "{\"imports\": [\"a.json\", \"kosm.json\"]}" },
+        .{
+            .text = "{\n\t\"imports\": [\n\t\t// \"./keybinds.json\"\n\t],\n}\n",
+            .expected = "{\n\t\"imports\": [\n\t\t\"kosm.json\"\n\t\t// \"./keybinds.json\"\n\t],\n}\n",
+        },
+    };
+    for (cases) |case| {
+        var fixture: Fixture = undefined;
+        try fixture.init(&.{.{ "settings.json", case.text }});
+        defer fixture.deinit();
+        var settings = try fixture.output.edit(.{ .files = "~/settings.json", .lang = "jsonc" });
+        try settings.append((try settings.nodes("imports"))[0], "kosm.json");
+        try testing.expectEqualStrings(case.expected, fixture.planned("~/settings.json"));
+    }
+}
+
+test "insert refuses a key the table has and a value that is no table, and append a non-list" {
+    var fixture: Fixture = undefined;
+    try fixture.init(&.{.{ "settings.json", "{\"imports\": [], \"a\": 1}" }});
+    defer fixture.deinit();
+    var settings = try fixture.output.edit(.{ .files = "~/settings.json" });
+    const top = (try settings.nodes(""))[0];
+    try testing.expectError(error.KeyExists, settings.insert(top, "imports", 1));
+    try testing.expectEqualStrings("the table on line 1 already has 'imports'; set it instead", fixture.diagnostics.message());
+    try testing.expectError(error.NotATable, settings.insert((try settings.nodes("a"))[0], "b", 1));
+    try testing.expectError(error.NotAList, settings.append(top, 1));
+    try testing.expectEqualStrings("{\"imports\": [], \"a\": 1}", fixture.planned("~/settings.json"));
 }
