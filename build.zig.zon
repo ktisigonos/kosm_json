@@ -18,6 +18,7 @@
         "build.zig.zon",
         "root.zig",
         "JsoncParser.zig",
+        "inserting.zig",
         "README.md",
     },
 }
